@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import scipy.optimize as op
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-def optimise_ll( log_prob, theta, *args, live_plot=False, nsub=50, nloop=20 ):
+def optimise_ll( log_prob, theta, *args, live_plot=False, nsub=50, nloop=20, quiet=False ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -13,11 +13,13 @@ def optimise_ll( log_prob, theta, *args, live_plot=False, nsub=50, nloop=20 ):
         return -log_prob( theta, *args )
 
     simplex=None
-    X=[0] ; Y=[nll( theta, *args )]
+    X=[0] ; Y=[-nll( theta, *args )]
 
     if( live_plot ):
         fig = plt.figure()
         ax = fig.add_subplot(111)
+        ax.set_ylabel("Log Probability")
+        ax.set_xlabel("Iteration")
         plt.grid()
 
         graph = ax.plot(X,Y,'-o')[0]
@@ -35,7 +37,7 @@ def optimise_ll( log_prob, theta, *args, live_plot=False, nsub=50, nloop=20 ):
         simplex = result.final_simplex[0]
 
         X.append(i*nsub)
-        Y.append(result.fun)
+        Y.append(-result.fun)
         if( live_plot ):
             graph.set_xdata(X)
             graph.set_ydata(Y)
@@ -46,7 +48,7 @@ def optimise_ll( log_prob, theta, *args, live_plot=False, nsub=50, nloop=20 ):
             ax.set_ylim( mid-1.2*rng,mid+1.2*rng)
             plt.draw()
             plt.pause(0.01)
-        print("{:3d} {:15.3f}".format(i*nsub,result.fun))
+        if( not quiet ) : print("{:3d} {:15.3f}".format(i*nsub,result.fun))
         if( result.success ) : break
     return theta
 
@@ -68,7 +70,7 @@ def setup_initial_ball(lnprob, theta, *args, nwalker=300, scale=None ):
         while not ( lp>-np.inf) :
             theta_t = np.array(theta)
             for j in range(ndim):
-                theta_t[j] = theta[j]*(1 + 1e-2*(np.random.random()-0.5)) + (1e-3*(np.random.random()-0.5))
+                theta_t[j] = theta[j]*(1 + 1e-3*(np.random.random()-0.5)) + (1e-4*(np.random.random()-0.5))
             lp = lnprob( theta_t, *args)
             if( np.isfinite(lp) ):
                 p0[i] = theta_t
@@ -110,38 +112,97 @@ def change_walkers( lnprob, p0, nwalker, *args ):
 
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-def MCMC_all( lnprob,theta, *args, nsteps=300, nwalker=200 ):
+def setup_live_plot( nsteps, div,max_LL=None ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    print("- - - - Starting MCMC sampling - - - - ")
-    print(theta )
+    nprint=nsteps//div
+    X=np.zeros(nprint)
+    percs=np.zeros([5,nprint])
+
+    fig = plt.figure()
+    plt.ion()
+    ax = fig.add_subplot(111)
+    plt.grid()
+
+    ax.set_xlim(-5,nsteps+5)
+    ax.autoscale(True,axis='y')
+
+    if( max_LL is not None ):
+        ax.plot( [0,400],[max_LL,max_LL], '--', lw=1.4)
+    plt.draw()
+    plt.pause(0.01)
+    return ax,X,percs    # return empty X and Y
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+def update_live_plot( ax,result, X,percs,i,j,max_LL=None):
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    X[j]=i
+    percs[:,j] = np.percentile( result[1], [5,25,50,75,95] )
+    ax.clear()
+    nsteps=len(X)
+    ax.set_xlim(-5,nsteps+5)
+    ax.grid()
+    plt.fill_between(X[0:j+1],percs[0,0:j+1],percs[4,0:j+1], color='red',alpha=0.1)
+    plt.fill_between(X[0:j+1],percs[1,0:j+1],percs[3,0:j+1], color='red',alpha=0.4)
+    plt.plot(        X[0:j+1],percs[2,0:j+1],                color='red', lw=2 )
+    if( max_LL is not None ):
+        ax.plot( [0,400],[max_LL,max_LL], '--', lw=1.4,color="blue")
+    ax.set_ylabel("log prob")
+    ax.set_xlabel("iteration")
+    plt.draw()
+    plt.pause(0.01)
+    return X,percs
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+def MCMC_all( lnprob,theta, *args, nsteps=300, nwalker=200, threads=7, \
+              max_LL=None, live_plot=False, quiet=False ):
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    if( not quiet ):
+        print("- - - - Starting MCMC sampling - - - - ")
+        print(theta )
+
+    if( live_plot ):
+        div=max(nsteps//100,1)
+        ax,X,percs = setup_live_plot( nsteps,div, max_LL )
+
     ndim, nwalkers = np.size(theta), nwalker
     ll = lnprob(theta, *args)
 
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(args), threads=7)
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(args), threads=threads)
     p0 = setup_initial_ball( lnprob, theta, *args, nwalker=nwalker )
-
+    
+    j=0
     for i, result in enumerate(sampler.sample(p0, iterations=nsteps)):
-
-        if (i+0) % 10 == 0:
-            print("{0:5.1%} {1}".format(float(i) / nsteps, np.average(result[1])))
-
+        if( not quiet ):
+            if (i+0) % 10 == 0:
+                print("{0:5.1%} {1}".format(float(i) / nsteps, np.average(result[1])))
+        if (i+0) % div == 0:
+            if(live_plot):  X,percs = update_live_plot(ax, result,X,percs,i,j,max_LL)
+            j+=1
     return sampler
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-def MCMC_restart( lnprob, p0, *args, nsteps=400 ):
+def MCMC_restart( lnprob, p0, *args, nsteps=400, threads=7, live_plot=False, max_LL=None ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -    
     print("- - - - Starting MCMC sampling - - - - ")
     nwalkers, ndim = np.shape(p0)
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(args), threads=threads)
 
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(args), threads=7)
+    if( live_plot ): 
+        div=max(nsteps//100,1)
+        ax,X,percs = setup_live_plot( nsteps,div, max_LL )
 
+    j=0
     for i, result in enumerate(sampler.sample(p0, iterations=nsteps)):
 
-        if (i+0) % 10 == 0:
+        if (i+0) % div == 0:
             print("{0:5.1%} {1}".format(float(i) / nsteps, np.average(result[1])))
-                   
+            if(live_plot):  X,percs = update_live_plot(ax, result,X,percs,i,j,max_LL)
+            j+=1
 
+    if( live_plot ):
+        plt.ioff()
     return sampler
+
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def median_chain( chain, nburn=50 ):
@@ -153,21 +214,17 @@ def median_chain( chain, nburn=50 ):
     return theta
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-def pull_post( chain, func, x, nburn=50, nsamp=100,  ):
+def pull_post( chain, func, nburn=50, nsamp=100  ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     ''' evals func on trandom samples from cgain of thetaa, x )'''
     nwalk, nstep, ntheta = np.shape(chain)
 
-    
-    ta,ya = func( chain[0,0,:], x )
-    [nv,nx] = np.shape(ya)
-    cout = np.zeros( [nsamp,nv,nx] )
-
+    cout = np.zeros( nsamp )
     for i in range(nsamp):
         i_w = np.random.randint(     0, nwalk )
         i_s = np.random.randint( nburn, nstep )
         theta_t = chain[ i_w, i_s ]
-        ta , ya = func( theta_t, x )
+        ya = func( theta_t )
         cout[i] = np.copy(ya)
     return cout
 

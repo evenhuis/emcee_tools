@@ -7,15 +7,16 @@ def replace( r, i, v) :
     return ro
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-def plot_prior_post( lnprior, chain, rngx ):
+def plot_prior_post( lnprior, chain, i, rngx ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    nwalk, nstep = np.shape(chain)    
+    nwalk, nstep, nt = np.shape(chain)    
     x = np.linspace(rngx[0],rngx[1],101)
     fig, ax1 = plt.subplots()
 
-    ax1.plot(x, list(map( lambda xx : np.exp(lnprior(xx)) , x )) )
+    theta = np.median( chain[:,-1,:],axis=0)
+    ax1.plot(x, list(map( lambda xx : np.exp(lnprior(replace(theta,i,xx))) , x )) )
     ax2 = ax1.twinx()
-    ax2.hist( chain.flatten() )
+    ax2.hist( chain[:,:,i].flatten(), bins=np.linspace(rngx[0],rngx[1],101) )
     plt.show()
 
 
