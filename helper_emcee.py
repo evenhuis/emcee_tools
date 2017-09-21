@@ -153,7 +153,7 @@ def update_live_plot( ax,result, X,percs,i,j,max_LL=None):
     return X,percs
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-def MCMC_all( lnprob,theta, *args, nsteps=300, nwalker=200, threads=7, \
+def MCMC_all( lnprob,theta, *args, nsteps=300, nwalker=200, threads=1, \
               max_LL=None, live_plot=False, quiet=False ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     if( not quiet ):
@@ -164,12 +164,14 @@ def MCMC_all( lnprob,theta, *args, nsteps=300, nwalker=200, threads=7, \
         div=max(nsteps//100,1)
         ax,X,percs = setup_live_plot( nsteps,div, max_LL )
 
+    div=1
     ndim, nwalkers = np.size(theta), nwalker
     ll = lnprob(theta, *args)
+    print("loglik {:.2f}".format(ll))
 
     sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(args), threads=threads)
     p0 = setup_initial_ball( lnprob, theta, *args, nwalker=nwalker )
-    
+    print("p0 genered")
     j=0
     for i, result in enumerate(sampler.sample(p0, iterations=nsteps)):
         if( not quiet ):
