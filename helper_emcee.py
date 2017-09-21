@@ -189,6 +189,7 @@ def MCMC_restart( lnprob, p0, *args, nsteps=400, threads=7, live_plot=False, max
     nwalkers, ndim = np.shape(p0)
     sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(args), threads=threads)
 
+    div =1
     if( live_plot ): 
         div=max(nsteps//100,1)
         ax,X,percs = setup_live_plot( nsteps,div, max_LL )
