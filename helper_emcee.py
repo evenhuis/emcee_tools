@@ -32,7 +32,7 @@ def optimise_ll( log_prob, theta, *args, live_plot=False, nsub=50, nloop=20, qui
 
     for i in range(1,nloop+1):
         result = op.minimize(nll, theta,  args=(args), method="nelder-mead", \
-                 options={'initial_simplex':simplex,'xtol': 1e-4, 'disp':False , 'maxiter':50})
+                 options={'initial_simplex':simplex,'xtol': 1e-4, 'disp':False , 'maxiter':nsub})
         theta = result.x
         simplex = result.final_simplex[0]
 
@@ -51,6 +51,61 @@ def optimise_ll( log_prob, theta, *args, live_plot=False, nsub=50, nloop=20, qui
         if( not quiet ) : print("{:3d} {:15.3f}".format(i*nsub,result.fun))
         if( result.success ) : break
     return theta
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+def optimise_ll_act( log_prob, theta, active, *args, live_plot=False, nsub=50, nloop=20, quiet=False ):
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    theta_ref = theta
+    theta_act = theta[active]
+
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    def nll( theta_a, *args ):
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        theta_ref[active] = theta_a
+        return -log_prob( theta_ref, *args )
+
+    simplex=None
+    X=[0] ; Y=[-nll( theta_act, *args )]
+
+    if( live_plot ):
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.set_ylabel("Log Probability")
+        ax.set_xlabel("Iteration")
+        plt.grid()
+
+        graph = ax.plot(X,Y,'-o')[0]
+
+        ax.set_xlim(-5,nloop*nsub+5)
+        ax.autoscale(True,axis='y')
+
+        plt.draw()
+        plt.pause(0.01)
+
+    for i in range(1,nloop+1):
+        result = op.minimize(nll, theta_act,  args=(args), method="nelder-mead", \
+                 options={'initial_simplex':simplex,'xtol': 1e-4, 'disp':False , 'maxiter':nsub})
+        theta_act = result.x
+        simplex = result.final_simplex[0]
+
+        X.append(i*nsub)
+        Y.append(-result.fun)
+        if( live_plot ):
+            graph.set_xdata(X)
+            graph.set_ydata(Y)
+       
+            yhi=np.percentile(Y,90)
+            mid=0.5*(yhi+np.min(Y))
+            rng=0.5*(yhi-np.min(Y))
+            ax.set_ylim( mid-1.2*rng,mid+1.2*rng)
+            plt.draw()
+            plt.pause(0.01)
+        if( not quiet ) : print("{:3d} {:15.3f}".format(i*nsub,result.fun))
+        if( result.success ) : break
+
+    theta_ref[active] = theta_act
+    return theta_ref
+
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def setup_initial_ball(lnprob, theta, *args, nwalker=300, scale=None ):
@@ -160,6 +215,7 @@ def MCMC_all( lnprob,theta, *args, nsteps=300, nwalker=200, threads=7, \
         print("- - - - Starting MCMC sampling - - - - ")
         print(theta )
 
+    div=1
     if( live_plot ):
         div=max(nsteps//100,1)
         ax,X,percs = setup_live_plot( nsteps,div, max_LL )
