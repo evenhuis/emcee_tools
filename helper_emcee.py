@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 import scipy.optimize as op
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-def optimise_ll( log_prob, theta, *args, live_plot=False, nsub=50, nloop=20, quiet=False ):
+def optimise_ll( log_prob, theta, *args,  nsub=50, nloop=20,\
+                live_plot=False, plot=False, quiet=False ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -48,8 +49,20 @@ def optimise_ll( log_prob, theta, *args, live_plot=False, nsub=50, nloop=20, qui
             ax.set_ylim( mid-1.2*rng,mid+1.2*rng)
             plt.draw()
             plt.pause(0.01)
-        if( not quiet ) : print("{:3d} {:15.3f}".format(i*nsub,result.fun))
+        if( not quiet ) : print("{:3d} {:15.3f}".format(i*nsub,-result.fun))
         if( result.success ) : break
+    
+    if( plot ):
+        
+        plt.plot( X,Y,'-o')
+        plt.ylabel("Log Probability")
+        plt.xlabel("Iteration")
+        plt.axhline(Y[-1],ls='-',color='red')
+        plt.axhline(Y[-1]-2,ls='--',color='red')
+        plt.text(0.1*X[0]+0.9*X[-1],0.25*Y[0]+0.75*(Y[-1]),"tolerance",color='red')
+        plt.grid()
+        plt.suptitle("Maximise Liklihood")
+        plt.show()
     return theta
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -169,9 +182,7 @@ def change_walkers( lnprob, p0, nwalker, *args ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def setup_live_plot( nsteps, div,max_LL=None ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    nprint=nsteps//div
-    X=np.zeros(nprint)
-    percs=np.zeros([5,nprint])
+ 
 
     fig = plt.figure()
     plt.ion()
@@ -185,13 +196,12 @@ def setup_live_plot( nsteps, div,max_LL=None ):
         ax.plot( [0,400],[max_LL,max_LL], '--', lw=1.4)
     plt.draw()
     plt.pause(0.01)
-    return ax,X,percs    # return empty X and Y
+    return ax    # return empty X and Y
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def update_live_plot( ax,result, X,percs,i,j,max_LL=None):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    X[j]=i
-    percs[:,j] = np.percentile( result[1], [5,25,50,75,95] )
+
     ax.clear()
     nsteps=len(X)
     ax.set_xlim(-5,nsteps+5)
@@ -205,44 +215,63 @@ def update_live_plot( ax,result, X,percs,i,j,max_LL=None):
     ax.set_xlabel("iteration")
     plt.draw()
     plt.pause(0.01)
-    return X,percs
+    return 
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-def MCMC_all( lnprob,theta, *args, nsteps=300, nwalker=200, threads=7, \
+def MCMC_all( lnprob,theta, *args, nsteps=300, nwalker=200, threads=1, \
               max_LL=None, live_plot=False, quiet=False ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     if( not quiet ):
         print("- - - - Starting MCMC sampling - - - - ")
-        print(theta )
+
+
+    div=max(nsteps//100,1)
+    nprint=nsteps//div
+    X=np.zeros(nprint)
+    percs=np.zeros([5,nprint])
 
     div=1
     if( live_plot ):
-        div=max(nsteps//100,1)
-        ax,X,percs = setup_live_plot( nsteps,div, max_LL )
+        ax = setup_live_plot( nsteps,div, max_LL )
 
+    div=1
     ndim, nwalkers = np.size(theta), nwalker
     ll = lnprob(theta, *args)
 
     sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(args), threads=threads)
     p0 = setup_initial_ball( lnprob, theta, *args, nwalker=nwalker )
-    
+
     j=0
     for i, result in enumerate(sampler.sample(p0, iterations=nsteps)):
         if( not quiet ):
             if (i+0) % 10 == 0:
-                print("{0:5.1%} {1}".format(float(i) / nsteps, np.average(result[1])))
+                print("{0:5.1%} {1:}".format(float(i) / nsteps, np.average(result[1])))
         if (i+0) % div == 0:
-            if(live_plot):  X,percs = update_live_plot(ax, result,X,percs,i,j,max_LL)
+            X[j]=i
+            percs[:,j] = np.percentile( result[1], [5,25,50,75,95] )
+            if(live_plot): update_live_plot(ax, result,X,percs,i,j,max_LL)
             j+=1
+    
+    plt.fill_between(X,percs[0],percs[4], color='red',alpha=0.1)
+    plt.fill_between(X,percs[1],percs[3], color='red',alpha=0.4)
+    plt.plot(        X,percs[2],          color='red', lw=2 )
+    if( max_LL is not None ):
+        plt.plot( [0,400],[max_LL,max_LL], '--', lw=1.4,color="blue")
+    plt.ylabel("log prob")
+    plt.xlabel("iteration")          
+    plt.show()
     return sampler
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-def MCMC_restart( lnprob, p0, *args, nsteps=400, threads=7, live_plot=False, max_LL=None ):
+def MCMC_restart( lnprob, p0, *args, nsteps=400, threads=1, \
+                  plot=False, live_plot=False, max_LL=None ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -    
     print("- - - - Starting MCMC sampling - - - - ")
     nwalkers, ndim = np.shape(p0)
+
     sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(args), threads=threads)
 
+    div =1
     if( live_plot ): 
         div=max(nsteps//100,1)
         ax,X,percs = setup_live_plot( nsteps,div, max_LL )
